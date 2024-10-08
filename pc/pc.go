@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"github.com/ChrisGora/semaphore"
+	"sync"
+
 	//"github.com/ChrisGora/semaphore"
 	"math/rand"
 	"time"
@@ -34,18 +37,26 @@ func (buffer *buffer) put(x int) {
 	buffer.write = (buffer.write + 1) % len(buffer.b)
 }
 
-func producer(buffer *buffer, start, delta int) {
+func producer(buffer *buffer, start, delta int, spaceAvailable, workAvailable semaphore.Semaphore, mutex *sync.Mutex) {
 	x := start
 	for {
+		spaceAvailable.Wait()
+		mutex.Lock()
 		buffer.put(x)
+		mutex.Unlock()
 		x = x + delta
+		workAvailable.Post()
 		time.Sleep(time.Duration(rand.Intn(500)) * time.Millisecond)
 	}
 }
 
-func consumer(buffer *buffer) {
+func consumer(buffer *buffer, spaceAvailable, workAvailable semaphore.Semaphore, mutex *sync.Mutex) {
 	for {
+		workAvailable.Wait()
+		mutex.Lock()
 		_ = buffer.get()
+		mutex.Unlock()
+		spaceAvailable.Post()
 		time.Sleep(time.Duration(rand.Intn(5000)) * time.Millisecond)
 	}
 }
@@ -53,11 +64,12 @@ func consumer(buffer *buffer) {
 func main() {
 	buffer := newBuffer(5)
 
-	//spaceAvailable := semaphore.Init(5, 5)
-	//workAvailable := semaphore.Init(5, 0)
+	spaceAvailable := semaphore.Init(5, 5)
+	workAvailable := semaphore.Init(5, 0)
+	var mutex sync.Mutex
 
-	go producer(&buffer, 1, 1)
-	go producer(&buffer, 1000, -1)
+	go producer(&buffer, 1, 1, spaceAvailable, workAvailable, &mutex)
+	go producer(&buffer, 1000, -1, spaceAvailable, workAvailable, &mutex)
 
-	consumer(&buffer)
+	consumer(&buffer, spaceAvailable, workAvailable, &mutex)
 }

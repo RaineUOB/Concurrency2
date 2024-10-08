@@ -4,38 +4,70 @@ import (
 	"container/list"
 	"flag"
 	"fmt"
+	"github.com/ChrisGora/semaphore"
 	"math/rand"
+	"strconv"
+	"sync"
 	"time"
 )
 
 var debug *bool
 
 // An executor is a type of a worker goroutine that handles the incoming transactions.
-func executor(bank *bank, executorId int, transactionQueue <-chan transaction, done chan<- bool) {
+func executor(bank *bank, executorId int, transactionQueue <-chan transaction, accountAvailable semaphore.Semaphore, checkTex *sync.Mutex, done chan<- bool) {
+	t := <-transactionQueue
 	for {
-		t := <-transactionQueue
-
 		from := bank.getAccountName(t.from)
 		to := bank.getAccountName(t.to)
 
-		fmt.Println("Executor\t", executorId, "attempting transaction from", from, "to", to)
-		e := bank.addInProgress(t, executorId) // Removing this line will break visualisations.
+		checkTex.Lock()
 
-		// bank.lockAccount(t.from, strconv.Itoa(executorId))
-		// fmt.Println("Executor\t", executorId, "locked account", from)
-		// bank.lockAccount(t.to, strconv.Itoa(executorId))
-		// fmt.Println("Executor\t", executorId, "locked account", to)
+		if !bank.accounts[t.to].locked && !bank.accounts[t.from].locked {
 
-		bank.execute(t, executorId)
+			fmt.Println("Executor\t", executorId, "attempting transaction from", from, "to", to)
+			e := bank.addInProgress(t, executorId) // Removing this line will break visualisations.
 
-		// bank.unlockAccount(t.from, strconv.Itoa(executorId))
-		// fmt.Println("Executor\t", executorId, "unlocked account", from)
-		// bank.unlockAccount(t.to, strconv.Itoa(executorId))
-		// fmt.Println("Executor\t", executorId, "unlocked account", to)
+			if t.from < t.to {
+				bank.lockAccount(t.to, strconv.Itoa(executorId))
+				fmt.Println("Executor\t", executorId, "locked account", from)
+				bank.lockAccount(t.from, strconv.Itoa(executorId))
+				fmt.Println("Executor\t", executorId, "locked account", to)
+			} else {
+				bank.lockAccount(t.from, strconv.Itoa(executorId))
+				fmt.Println("Executor\t", executorId, "locked account", from)
+				bank.lockAccount(t.to, strconv.Itoa(executorId))
+				fmt.Println("Executor\t", executorId, "locked account", to)
+			}
+			checkTex.Unlock()
 
-		bank.removeCompleted(e, executorId) // Removing this line will break visualisations.
-		done <- true
+			bank.execute(t, executorId)
+
+			bank.unlockAccount(t.from, strconv.Itoa(executorId))
+			fmt.Println("Executor\t", executorId, "unlocked account", from)
+			bank.unlockAccount(t.to, strconv.Itoa(executorId))
+			fmt.Println("Executor\t", executorId, "unlocked account", to)
+
+			bank.removeCompleted(e, executorId) // Removing this line will break visualisations.
+			done <- true
+			accountAvailable.Post()
+
+			t = <-transactionQueue
+		} else {
+			checkTex.Unlock()
+			accountAvailable.Wait()
+		}
 	}
+}
+func manager(bank *bank, bankSize int, transactionQueue chan transaction, done chan<- bool) {
+
+	//readyQueue := make(chan transaction)
+	accountAvailable := semaphore.Init(3, 3)
+	checktex := &sync.Mutex{}
+
+	for i := 0; i < bankSize; i++ {
+		go executor(bank, i, transactionQueue, accountAvailable, checktex, done)
+	}
+
 }
 
 func toChar(i int) rune {
@@ -74,9 +106,7 @@ func main() {
 
 	done := make(chan bool)
 
-	for i := 0; i < bankSize; i++ {
-		go executor(&bank, i, transactionQueue, done)
-	}
+	manager(&bank, bankSize, transactionQueue, done)
 
 	for total := 0; total < transactions; total++ {
 		fmt.Println("Completed transactions\t", total)

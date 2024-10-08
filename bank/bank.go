@@ -4,6 +4,7 @@ package main
 
 import (
 	"container/list"
+	"fmt"
 	"math/rand"
 	"strconv"
 	"sync"
@@ -62,13 +63,14 @@ func (bank *bank) lock(lockedBy string) {
 func (bank *bank) unlock() {
 	if *debug {
 		bank.gen.export(bank)
+		//	println("Generated export")
 	}
-	//unlockedBy := bank.lockedBy
+	unlockedBy := bank.lockedBy
 	bank.lockedBy = ""
 	bank.mutex.Unlock()
-	//if *debug {
-	//	fmt.Println("Bank unlocked by", unlockedBy)
-	//}
+	if *debug {
+		fmt.Println("Bank unlocked by", unlockedBy)
+	}
 }
 
 // lockAccount locks the account mutex.
@@ -111,7 +113,7 @@ func (bank *bank) removeCompleted(element *list.Element, executorId int) {
 }
 
 // getTransaction generates a new transaction to be handled by the executor.
-// In reality this would come from the bank customers and staff.
+// In reality this +would come from the bank customers and staff.
 // YOU ARE NOT ALLOWED TO MODIFY THIS FUNCTION
 func (bank *bank) getTransaction() transaction {
 	from := randomInt(len(bank.accounts))
